@@ -1,0 +1,21 @@
+{
+  "rules": {
+    "mp": {
+      "lobby": {
+        ".read": "auth != null",
+        "$uid": {
+          ".write": "auth != null && auth.uid == $uid",
+          ".validate": "newData.isString() && newData.val().length < 48"
+        }
+      },
+      "rooms": {
+        "$room": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid"
+          }
+        }
+      }
+    }
+  }
+}
