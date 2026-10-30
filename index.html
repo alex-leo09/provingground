@@ -494,12 +494,12 @@ const MODES = {
   mp:      { name: 'Multiplayer' },
 };
 const MAPS = {
-  yard:    { name: 'The Yard', tag: 'Outdoor · 72 m square', desc: 'Open-air training yard. Low crates you can climb, tall stacks for cover and four concrete pillars.' },
+  yard:    { name: 'The Yard', tag: 'Outdoor · 72 m square', desc: 'Open-air training yard with a concrete kill house: four rooms and a hallway, a walled roof up the stairs, and a covered underpass. Crates and pillars for cover.' },
   depot:   { name: 'Container Depot', tag: 'Indoor · 60 m square', desc: 'Covered freight hall. Blue, red and yellow shipping containers, some stacked two high, between black steel columns.' },
   reactor: { name: 'Blackout Reactor', tag: 'Indoor · 64 m square', desc: 'A dark hall around a glowing blue core. Rows of server racks, red barriers you can vault and yellow hazard pillars.', spawn: [0, 10] },
-  graveyard: { name: 'Hollow Graveyard', tag: 'Outdoor · night · 64 m square', desc: 'A moonlit Halloween graveyard: crooked headstones, glowing jack-o\'-lanterns, hay bales, two mausoleums and an old chapel.', spawn: [0, 22] },
+  graveyard: { name: 'Hollow Graveyard', tag: 'Outdoor · night · 64 m square', desc: 'A moonlit Halloween graveyard: crooked headstones and jack-o\'-lanterns, a candlelit chapel you can enter, and catacomb tunnels running from two mausoleums.', spawn: [0, 22] },
   frost:   { name: 'Frostfall Square', tag: 'Outdoor · snow · 66 m square', desc: 'A snowy Christmas town square: a giant lit tree, presents, snowmen, a red sleigh and log cabins strung with lights.', spawn: [0, 18] },
-  desert:  { name: 'Dune Quarter', tag: 'Outdoor · 68 m square', desc: 'A sun-baked desert town: sandstone and whitewashed houses, a domed house, a fountain square, a raised market terrace with steps, and an old car for cover.', spawn: [4, 14] },
+  desert:  { name: 'Dune Quarter', tag: 'Outdoor · 68 m square', desc: 'A sun-baked desert town: a kasbah of walk-in houses split by an alley with a rooftop bridge, a covered souk tunnel, a domed house, and a fountain square.', spawn: [4, 14] },
   range:   { name: 'Bay 4 Range', tag: 'Shooting range · 50 m lanes', desc: 'Covered firing booth with big, small and moving targets placed between 10 and 50 metres.' },
 };
 const BREAK = 20, BOT_RELOAD = 2.2, LOAD_TIME = 10, STEP = 0.55, PACK_LIFE = 50, LASER_CHANCE = 0.15;
@@ -780,6 +780,16 @@ const TEX = {
     }
     cracks(g, 4, 'rgba(120,100,70,0.45)');
   }),
+  concrete: canvasTex(256, 256, (g) => {
+    g.fillStyle = '#7d8489'; g.fillRect(0, 0, 256, 256);
+    speckle(g, 256, 256, 2200, [60, 66, 70], 0.3);
+    g.strokeStyle = 'rgba(40,44,48,0.5)'; g.lineWidth = 2; // formwork seams
+    for (const y of [0, 128]) { g.beginPath(); g.moveTo(0, y); g.lineTo(256, y); g.stroke(); }
+    g.fillStyle = 'rgba(40,44,48,0.55)';
+    [[32, 32], [224, 32], [32, 160], [224, 160]].forEach(([x, y]) => { g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); }); // tie holes
+    stains(g, 3, '30,26,20', 256, 256);
+    cracks(g, 3, 'rgba(35,38,40,0.5)');
+  }),
   wood: canvasTex(256, 256, (g) => woodPlanks(g, 256, 256, '#7a5a3a', 8)),
   logs: canvasTex(256, 256, (g) => {
     for (let i = 0; i < 8; i++) {
@@ -933,11 +943,68 @@ function addBlock(e, x, z, w, h, d, kind, y0 = 0) {
   m.castShadow = m.receiveShadow = true;
   e.group.add(m);
   e.meshes.push(m);
-  e.solids.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, h: y0 + h });
+  e.solids.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, h: y0 + h, y0 });
   return m;
 }
 function addDeco(e, geo, material, x, y, z) {
   const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); e.group.add(m); return m;
+}
+
+// ---------- walk-in buildings ----------
+// Solids keep a bottom (y0) as well as a top, so a ceiling or a door lintel only blocks you at head height.
+// Box with UVs scaled to its size, so one shared material tiles evenly on walls of any length (and merges into one draw call).
+function tiledBox(w, h, d, s = 4) {
+  const g = new THREE.BoxGeometry(w, h, d), uv = g.attributes.uv;
+  const dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]]; // +x -x +y -y +z -z faces
+  for (let f = 0; f < 6; f++) for (let i = 0; i < 4; i++) { const k = f * 4 + i; uv.setXY(k, uv.getX(k) * dims[f][0] / s, uv.getY(k) * dims[f][1] / s); }
+  return g;
+}
+const tileMats = {};
+const tileMat = (tex, extra) => tileMats[tex.uuid] || (tileMats[tex.uuid] = texMat(tex, 1, 1, Object.assign({ roughness: 0.9 }, extra)));
+function addSlab(e, x, z, w, h, d, m, y0 = 0) {
+  const o = new THREE.Mesh(tiledBox(w, h, d), m);
+  o.position.set(x, y0 + h / 2, z); o.castShadow = o.receiveShadow = true;
+  e.group.add(o); e.meshes.push(o);
+  e.solids.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, h: y0 + h, y0 });
+  return o;
+}
+// A straight wall from a0 to a1 along x (at z = c) or along z (at x = c), with doorways: [centre, width].
+// Each doorway keeps a lintel above dh; base lifts the whole wall (a parapet on a roof).
+function wallRun(e, ax, c, a0, a1, h, m, gaps = [], t = 0.3, dh = 2.7, base = 0) {
+  const seg = (s0, s1, y0, hh) => {
+    if (s1 - s0 < 0.02 || hh <= 0.01) return;
+    const L = s1 - s0, mid = (s0 + s1) / 2;
+    if (ax === 'x') addSlab(e, mid, c, L, hh, t, m, base + y0); else addSlab(e, c, mid, t, hh, L, m, base + y0);
+  };
+  let s = a0;
+  gaps.slice().sort((p, q) => p[0] - q[0]).forEach(([g, gw]) => { seg(s, g - gw / 2, 0, h); seg(g - gw / 2, g + gw / 2, dh, h - dh); s = g + gw / 2; });
+  seg(s, a1, 0, h);
+}
+// Four walls with doorways, a ceiling you can stand on, ceiling lamps, and an optional parapet around the roof.
+// doors = { n: [[x, width]], s: [...], w: [[z, width]], e: [...] } in world coordinates (n is the -z side).
+const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff0c8 });
+function addBuilding(e, x0, z0, x1, z1, h, m, doors = {}, o = {}) {
+  const t = o.t || 0.3;
+  wallRun(e, 'x', z0 + t / 2, x0, x1, h, m, doors.n, t);
+  wallRun(e, 'x', z1 - t / 2, x0, x1, h, m, doors.s, t);
+  wallRun(e, 'z', x0 + t / 2, z0 + t, z1 - t, h, m, doors.w, t);
+  wallRun(e, 'z', x1 - t / 2, z0 + t, z1 - t, h, m, doors.e, t);
+  addSlab(e, (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, 0.3, z1 - z0, o.roof || m, h);
+  if (o.parapet) { // a knee-high wall around the roof; o.parapet lists the openings, same shape as doors
+    const p = o.parapet, ph = 0.7, top = h + 0.3;
+    wallRun(e, 'x', z0 + 0.1, x0, x1, ph, m, p.n, 0.2, 99, top);
+    wallRun(e, 'x', z1 - 0.1, x0, x1, ph, m, p.s, 0.2, 99, top);
+    wallRun(e, 'z', x0 + 0.1, z0 + 0.2, z1 - 0.2, ph, m, p.w, 0.2, 99, top);
+    wallRun(e, 'z', x1 - 0.1, z0 + 0.2, z1 - 0.2, ph, m, p.e, 0.2, 99, top);
+  }
+  for (const [lx, lz] of o.lamps || []) addDeco(e, boxGeo(0.7, 0.05, 0.7), o.lampMat || lampMat, lx, h - 0.03, lz);
+}
+// Steps from (x, z) heading along (dx, dz); every riser is below the step height, so you simply walk up.
+function addStairs(e, x, z, dx, dz, n, rise, run, width, m) {
+  for (let i = 0; i < n; i++) {
+    const cx = x + dx * (i + 0.5) * run, cz = z + dz * (i + 0.5) * run;
+    addSlab(e, cx, cz, dx ? run : width, (i + 1) * rise, dx ? width : run, m);
+  }
 }
 // walls with a texture that repeats along their length
 function addWalls(e, W, h, tex, extra) {
@@ -1009,6 +1076,23 @@ function addLampPost(e, x, z, ry = 0) {
     addDeco(A, new THREE.BoxGeometry(w, 0.25, d), amberMat, x, 4.2, z));
   const srand = seeded(4242);
   [[-12, -12], [12, -12], [-12, 12], [12, 12]].forEach(([x, z]) => addBlock(A, x, z, 2.2, 6, 2.2, 'pillar'));
+  // the kill house: a concrete training building in the south-west corner. Four rooms and a hallway, doors on three
+  // sides, stairs up the west wall to a walled roof, and a covered underpass from its east door toward the middle.
+  const conc = tileMat(TEX.concrete), YH = 3.2;
+  addBuilding(A, -31, 15, -17, 31, YH, conc, { n: [[-28, 1.4]], e: [[19, 1.4], [27, 1.4]], s: [[-22.3, 1.4]] },
+    { lamps: [[-27.5, 19], [-20.5, 19], [-27.5, 27], [-22.2, 27], [-18.8, 27]], parapet: { w: [[23.2, 2.4]] } });
+  wallRun(A, 'x', 23, -30.7, -17.3, YH, conc, [[-28, 1.2], [-20, 1.2]]);
+  wallRun(A, 'z', -24, 15.3, 22.85, YH, conc, [[19, 1.2]]);
+  wallRun(A, 'z', -24, 23.15, 30.7, YH, conc, [[28, 1.2]]);
+  wallRun(A, 'z', -20.5, 23.15, 30.7, YH, conc, [[25, 1.2]]);           // splits off a hallway
+  addStairs(A, -32, 17, 0, 1, 7, 0.5, 0.95, 1.5, conc);
+  addBlock(A, -29.6, 16.6, 1.6, 1.0, 1.2, 'crateA'); addBlock(A, -18.6, 29.4, 1.4, 1.0, 1.4, 'crateBlue');
+  addBlock(A, -26.2, 25.2, 1.2, 1.8, 1.2, 'crateRed'); addBlock(A, -22.2, 16.8, 2.4, 1.0, 1.0, 'crateB');
+  wallRun(A, 'x', 25.4, -17, -4, 3.0, conc, [[-10, 1.6]], 0.4);
+  wallRun(A, 'x', 28.6, -17, -4, 3.0, conc, [], 0.4);
+  addSlab(A, -10.5, 27, 13, 0.3, 3.6, conc, 3.0);
+  for (const x of [-14, -7]) addDeco(A, boxGeo(0.9, 0.05, 0.3), lampMat, x, 2.97, 27);
+  addSign(A, 'KILL HOUSE', -26, 2.95, 31.03, 0, 2.6, 0.5, '#16181a', '#ffb22e');
   const kinds = ['crateA', 'crateB', 'crateBlue', 'crateRed'];
   for (let i = 0, placed = 0; placed < 26 && i < 400; i++) {
     const x = (srand() * 2 - 1) * (W - 4), z = (srand() * 2 - 1) * (W - 4);
@@ -1177,10 +1261,44 @@ function addLampPost(e, x, z, ry = 0) {
   // low cover wall in the east lane
   addBlock(E, 12, -3, 1, 2.2, 10, texMat(TEX.plaster, 10 / 4, 2.2 / 4));
 
-  // domed house in the south-east corner
-  addBlock(E, 22, 21, 9, 5.5, 9, texMat(TEX.plaster, 9 / 4, 5.5 / 4));
-  const dome = addDeco(E, new THREE.SphereGeometry(3.8, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat('whitewash'), 22, 5.5, 21); dome.castShadow = true; E.meshes.push(dome);
-  addDeco(E, vcylGeo(0.05, 1.4, 6), mat('steel'), 22, 9.9, 21);
+  const plasterT = tileMat(TEX.plaster), stoneT = tileMat(TEX.sandstone), woodT = tileMat(TEX.wood, { color: 0x8a6a4a });
+  const doorway = (x, z, ry) => { const a = addDeco(E, new THREE.PlaneGeometry(1.7, 0.25), mat('darkWood'), x, 2.83, z); a.rotation.y = ry; }; // timber over each doorway
+
+  // domed house in the south-east corner: one tall room with a door to the west and to the north
+  addBuilding(E, 17.5, 16.5, 26.5, 25.5, 5.5, plasterT, { n: [[22, 1.6]], w: [[20.5, 1.6]] }, { lamps: [[22, 21]] });
+  doorway(22, 16.45, Math.PI); doorway(17.45, 20.5, -Math.PI / 2);
+  addBlock(E, 24.6, 23.6, 1.4, 1.0, 1.4, 'crateWood'); addBlock(E, 19.6, 23.8, 1.6, 0.8, 1.0, 'crateWood');
+  const dome = addDeco(E, new THREE.SphereGeometry(3.8, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat('whitewash'), 22, 5.8, 21); dome.castShadow = true; E.meshes.push(dome);
+  addDeco(E, vcylGeo(0.05, 1.4, 6), mat('steel'), 22, 10.2, 21);
+
+  // the kasbah: two houses on the north side split by a narrow alley, a covered bridge joining their roofs,
+  // and outside stairs up to the rooftops. Inside, a wall with a doorway splits each house into two rooms.
+  const KH = 3.4;
+  addBuilding(E, 5, -30, 13.5, -19.5, KH, stoneT, { s: [[8, 1.6]], e: [[-26.5, 1.4]], n: [[11, 1.4]] },
+    { lamps: [[9, -27], [9, -22]], parapet: { e: [[-25, 2]] } });
+  wallRun(E, 'x', -24.8, 5.3, 13.2, KH, stoneT, [[10.5, 1.4]]);
+  addBuilding(E, 15.5, -30, 24, -19.5, KH, plasterT, { w: [[-22.5, 1.4]], s: [[21.5, 1.6]], n: [[18, 1.4]] },
+    { lamps: [[19.8, -27], [19.8, -22]], parapet: { w: [[-25, 2]], e: [[-26.8, 2.4]] } });
+  wallRun(E, 'z', 19.8, -29.7, -19.8, KH, plasterT, [[-27.2, 1.4], [-22.2, 1.4]]);
+  addSlab(E, 14.5, -25, 2, 0.3, 2.6, woodT, KH);                 // bridge over the alley, roof to roof
+  addStairs(E, 24.8, -20.6, 0, -1, 7, KH / 6.5, 0.95, 1.5, stoneT); // up the east wall to the roof
+  doorway(8, -19.45, 0); doorway(21.5, -19.45, 0);
+  [[6.2, -29], [12.4, -21], [16.5, -20.5], [23, -29]].forEach(([x, z]) => addBlock(E, x, z, 1.1, 1.1, 1.1, 'crateWood'));
+  addBarrel(E, 13.95, -20.6, '#2c5c9c'); // against the wall, leaving room to pass
+
+  // covered souk: a long roofed passage along the west wall, open at the north end, with side openings
+  // into the square; lanterns hang inside and cloth stalls line the outer wall.
+  const SX = -29.6;
+  wallRun(E, 'z', SX, -26, 7.5, 3.2, stoneT, [[-20, 1.6], [-12, 1.6], [-4, 1.6], [4.5, 1.6]], 0.4);
+  addSlab(E, (-W + SX + 0.2) / 2, -9.25, SX + 0.2 + W, 0.3, 33.5, woodT, 3.2);
+  for (let z = -22; z <= 6; z += 6) {
+    addDeco(E, boxGeo(0.3, 0.4, 0.3), new THREE.MeshBasicMaterial({ color: 0xffc46a }), -31.8, 2.7, z);
+    addDeco(E, boxGeo(0.03, 0.4, 0.03), mat('iron'), -31.8, 3.0, z);
+  }
+  [[-24, 0], [-16, 1], [-8, 2], [0, 0]].forEach(([z, c]) => {
+    addBlock(E, -33.2, z, 1.0, 0.9, 2.2, 'crateWood');
+    const cl = addDeco(E, boxGeo(0.03, 1.6, 2.4), clothMats[c], -33.9, 1.7, z); cl.castShadow = false;
+  });
   [[17.47, 18, Math.PI / 2 * 3], [17.47, 23, Math.PI / 2 * 3], [19, 16.47, Math.PI], [25, 16.47, Math.PI]].forEach(([x, z, ry]) => {
     const w = addDeco(E, winGeo, winMat, x, 3, z); w.rotation.y = ry;
     const a = addDeco(E, archGeo, winMat, x, 3.65, z); a.rotation.y = ry; a.scale.setScalar(0.56);
@@ -1294,33 +1412,54 @@ function addLampPost(e, x, z, ry = 0) {
     const m = addDeco(H, boxGeo(0.7, 0.08, 1.5), dirt, x, 0.04, z + 0.85); m.rotation.y = ry; // grave mound
     H.solids.push({ minX: x - 0.4, maxX: x + 0.4, minZ: z - 0.25, maxZ: z + 0.25, h });
   }
-  for (let z = -14; z <= 14; z += 4) for (let x = -26; x <= 26; x += 3.2) {
+  for (let z = -10; z <= 14; z += 4) for (let x = -26; x <= 26; x += 3.2) { // rows stop short of the catacombs
     if (Math.abs(x) < 3.5 || rnd() < 0.3) continue;
     grave(x + (rnd() - 0.5) * 0.6, z + (rnd() - 0.5) * 0.8, (rnd() - 0.5) * 0.35);
   }
   addDeco(H, new THREE.PlaneGeometry(5, W * 2 - 12), new THREE.MeshStandardMaterial({ map: TEX.gravestone, color: 0x4a4540, roughness: 1 }), 0, 0.012, 6).rotation.x = -Math.PI / 2; // gravel path
 
   // the old chapel at the north end, with a bell tower and glowing stained glass
-  const cz = -W + 6.5;
-  addBlock(H, 0, cz, 10, 6, 9, texMat(TEX.gravestone, 3, 2));
+  const cz = -W + 6.5, graveT = tileMat(TEX.gravestone), candle = new THREE.MeshBasicMaterial({ color: 0xffc46a });
+  // the chapel is open: a front door and two side doors, pews, an altar with candles, lit purple from inside
+  addBuilding(H, -5, cz - 4.5, 5, cz + 4.5, 6, graveT, { s: [[0, 1.8]], w: [[cz + 1.5, 1.4]], e: [[cz + 1.5, 1.4]] }, { t: 0.45, lampMat: candle, lamps: [[-2.5, cz - 1], [2.5, cz + 2]] });
+  for (const z of [cz + 3, cz + 1.4, cz - 0.2]) {
+    addBlock(H, -2.5, z, 2.8, 0.5, 0.5, 'darkWood');
+    if (z > cz - 1) addBlock(H, 2.2, z, 2.2, 0.5, 0.5, 'darkWood');
+  }
+  addBlock(H, -1, cz - 3.2, 2.4, 1.0, 0.9, stone);
+  [-1.8, -1.2, -0.4, 0.2].forEach((x, i) => addDeco(H, boxGeo(0.06, 0.25 + (i % 2) * 0.12, 0.06), candle, x, 1.15 + (i % 2) * 0.06, cz - 3.2));
+  const chapelGlow = new THREE.PointLight(0xb35cff, 1.1, 11); chapelGlow.position.set(-1, 3.5, cz - 1); H.group.add(chapelGlow);
   const roofShape = new THREE.Shape([new THREE.Vector2(-5.6, 0), new THREE.Vector2(5.6, 0), new THREE.Vector2(0, 4.2)]);
   const roof = addDeco(H, new THREE.ExtrudeGeometry(roofShape, { depth: 10, bevelEnabled: false }), new THREE.MeshStandardMaterial({ color: 0x2b2533, roughness: 0.9 }), 0, 6, cz - 5);
   roof.castShadow = true; H.meshes.push(roof);
   addBlock(H, 4, cz - 2.5, 3, 11, 3, texMat(TEX.gravestone, 1, 3.5));
   const spire = addDeco(H, new THREE.ConeGeometry(2.3, 4.5, 4), new THREE.MeshStandardMaterial({ color: 0x2b2533, roughness: 0.9 }), 4, 13.25, cz - 2.5); spire.rotation.y = Math.PI / 4; spire.castShadow = true;
   const front = cz + 4.52;
-  addDeco(H, new THREE.PlaneGeometry(1.8, 2.8), new THREE.MeshStandardMaterial({ map: TEX.door, roughness: 0.9 }), 0, 1.4, front);
+  addDeco(H, new THREE.PlaneGeometry(1.8, 2.7), new THREE.MeshStandardMaterial({ map: TEX.door, roughness: 0.9, side: THREE.DoubleSide }), 0.9, 1.35, front + 0.9).rotation.y = Math.PI / 2; // swung open
   addDeco(H, new THREE.CircleGeometry(0.9, 18, 0, Math.PI), new THREE.MeshStandardMaterial({ map: TEX.door, roughness: 0.9 }), 0, 2.8, front);
   [[-3, 0xb35cff], [3, 0xff8a2a]].forEach(([x, c]) => { addDeco(H, new THREE.PlaneGeometry(1.1, 2.2), new THREE.MeshBasicMaterial({ color: c }), x, 3.4, front); addDeco(H, new THREE.CircleGeometry(0.55, 14, 0, Math.PI), new THREE.MeshBasicMaterial({ color: c }), x, 4.5, front); });
   addDeco(H, new THREE.CircleGeometry(0.9, 20), new THREE.MeshBasicMaterial({ color: 0xd94a4a }), 0, 7.6, front + 0.01); // rose window
   const doorLight = new THREE.PointLight(0xffa040, 1.3, 12); doorLight.position.set(0, 2.5, front + 1.5); H.group.add(doorLight);
 
-  // two mausoleums with columns (their roofs can be climbed)
-  [[-22, -16], [22, -16]].forEach(([x, z]) => {
-    addBlock(H, x, z, 4, 3.2, 5, texMat(TEX.gravestone, 1.3, 1));
+  // two mausoleums with columns: walk in through the gate, out the side into the catacombs (their roofs can be climbed)
+  [[-22, -16, 1], [22, -16, -1]].forEach(([x, z, s]) => {
+    const side = s > 0 ? { e: [[z, 1.4]] } : { w: [[z, 1.4]] };
+    addBuilding(H, x - 2, z - 2.5, x + 2, z + 2.5, 3.2, graveT, { s: [[x, 1.4]], ...side }, { lampMat: candle, lamps: [[x, z - 1.2]] });
     addBlock(H, x, z, 4.6, 0.4, 5.6, stone, 3.2);
+    addBlock(H, x - s * 0.9, z - 1.2, 1.2, 0.7, 2.0, stone); // a stone coffin
     [-1.6, 1.6].forEach(dx => addDeco(H, vcylGeo(0.2, 3.2, 10), stone, x + dx, 1.6, z + 2.9).castShadow = true);
-    addDeco(H, new THREE.PlaneGeometry(1.4, 2.2), iron, x, 1.1, z + 2.52);
+    const gate = addDeco(H, new THREE.PlaneGeometry(1.4, 2.2), new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.5, metalness: 0.7, side: THREE.DoubleSide }), x - 0.7, 1.1, z + 3.2);
+    gate.rotation.y = Math.PI / 2; // hanging open
+  });
+  // catacombs: low stone tunnels from each mausoleum to the central path, with a side opening each way.
+  // A crate against each lets you climb onto the tunnel roof, and from there onto the mausoleum.
+  const vault = new THREE.MeshBasicMaterial({ color: 0xff9a3a });
+  [[-20, -4, -12, -9, -14], [4, 20, 12, 9, 14]].forEach(([a0, a1, gn, gs, cx]) => {
+    wallRun(H, 'x', -17.3, a0, a1, 2.8, graveT, [[gn, 1.4]], 0.4);
+    wallRun(H, 'x', -14.7, a0, a1, 2.8, graveT, [[gs, 1.4]], 0.4);
+    addSlab(H, (a0 + a1) / 2, -16, a1 - a0, 0.3, 3, graveT, 2.8);
+    for (let x = a0 + 2.5; x < a1 - 1; x += 4) addDeco(H, boxGeo(0.25, 0.3, 0.25), vault, x, 2.55, -16.9);
+    addBlock(H, cx, -13.9, 1.2, 1.0, 1.2, 'darkWood');
   });
 
   // hay bales with jack-o'-lanterns, each cluster lit by its own glow
@@ -1562,9 +1701,10 @@ function mergeStatic(e) {
 Object.values(envs).forEach(mergeStatic);
 setEnv('yard');
 
-function resolveCircle(p, r, y) {
+// push a circle out of every solid at its height; a solid whose bottom is above `tall` (a ceiling, a lintel) lets it pass under
+function resolveCircle(p, r, y, tall = 1.75) {
   for (const b of env.solids) {
-    if (y >= b.h - 0.01) continue;
+    if (y >= b.h - 0.01 || (b.y0 || 0) > y + tall) continue;
     const cx = clamp(p.x, b.minX, b.maxX), cz = clamp(p.z, b.minZ, b.maxZ);
     const dx = p.x - cx, dz = p.z - cz, d2 = dx * dx + dz * dz;
     if (d2 >= r * r) continue;
@@ -1586,7 +1726,7 @@ function groundAt(x, z, r, y, step = 0.01) {
   }
   return g;
 }
-const insideSolid = v => env.solids.some(b => v.y < b.h && v.x > b.minX && v.x < b.maxX && v.z > b.minZ && v.z < b.maxZ);
+const insideSolid = v => env.solids.some(b => v.y < b.h && v.y >= (b.y0 || 0) && v.x > b.minX && v.x < b.maxX && v.z > b.minZ && v.z < b.maxZ);
 
 // ---------- map previews (overhead cutaway, roof hidden) ----------
 const previews = {};
@@ -3520,6 +3660,7 @@ function tryMantle() {
   for (const b of env.solids) {
     const up = b.h - player.y;
     if (up <= 0.05 || up > 1.05 || b.noGrab || !under(b, r)) continue;
+    if ((b.y0 || 0) > player.y + 0.6) continue;                                      // a ceiling over your head, not a ledge
     if (b.maxX - b.minX < 0.5 && b.maxZ - b.minZ < 0.5) continue;                 // posts and trunks are too thin to stand on
     if (env.solids.some(o => o !== b && o.h > b.h + 0.01 && under(o, r * 0.5))) continue; // something taller is in the way
     // pull up and over the edge so you are standing on the block, not hovering beside it
@@ -3563,6 +3704,13 @@ function updatePlayer(dt) {
     if (slideT > 0) { slideT = 0; slideCd = 0.35; } // slide-jump keeps the momentum
   }
   player.vy -= 23 * dt; player.y += player.vy * dt;
+  if (player.vy > 0) { // jumping indoors: your head stops at the ceiling
+    const p = player.p, head = player.y + 1.85;
+    for (const b of env.solids) {
+      if (!(b.y0 > player.y + 0.5) || head <= b.y0) continue;
+      if (p.x + 0.35 > b.minX && p.x - 0.35 < b.maxX && p.z + 0.35 > b.minZ && p.z - 0.35 < b.maxZ) { player.y = b.y0 - 1.85; player.vy = 0; }
+    }
+  }
   const g = groundAt(player.p.x, player.p.z, 0.4, player.y, player.grounded ? STEP : 0.01);
   const wasAir = !player.grounded;
   if (player.y <= g) {
